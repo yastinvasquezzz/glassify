@@ -1,12 +1,12 @@
 import { Track, Album, Artist } from '../types';
 
-const BACKEND_URL = 'http://localhost:3001';
+const BACKEND_URL = (import.meta as any).env?.VITE_BACKEND_URL || 'https://glassify-p280.onrender.com';
 
 // In-Memory search cache to return search results in 0ms
 const searchCache = new Map<string, { tracks: Track[]; albums: Album[]; artists: Artist[] }>();
 
 /**
- * Searches YouTube Music catalog via local yt-dlp backend server
+ * Searches YouTube Music catalog via yt-dlp backend server
  * Returns the EXACT official audio tracks extracted from YouTube Music
  */
 export const searchTracksFromApi = async (queryTerm: string): Promise<{
@@ -20,14 +20,23 @@ export const searchTracksFromApi = async (queryTerm: string): Promise<{
 
   const cleanQuery = queryTerm.trim().toLowerCase();
 
-  // Instant response if cached
   if (searchCache.has(cleanQuery)) {
     return searchCache.get(cleanQuery)!;
   }
 
   try {
     const res = await fetch(`${BACKEND_URL}/api/search?q=${encodeURIComponent(queryTerm.trim())}`);
-    if (!res.ok) throw new Error(`YouTube Music Backend HTTP Error: ${res.status}`);
+    if (!res.ok) {
+      // Fallback to local 3001 if remote is unreachable
+      const fallbackRes = await fetch(`http://localhost:3001/api/search?q=${encodeURIComponent(queryTerm.trim())}`);
+      if (!fallbackRes.ok) throw new Error(`Backend HTTP Error: ${fallbackRes.status}`);
+      const fallbackData = await fallbackRes.json();
+      return {
+        tracks: fallbackData.tracks || [],
+        albums: fallbackData.albums || [],
+        artists: fallbackData.artists || [],
+      };
+    }
 
     const data = await res.json();
     const result = {
@@ -67,7 +76,6 @@ export const fetchTopTrendingTracks = async (): Promise<{
       searchTracksFromApi('Drake'),
     ]);
 
-    // Weave diverse tracks together: 1 Bruno, 1 Bad Bunny, 1 Weeknd, 1 Dua, 1 Taylor, 1 Drake...
     const diverseTrending: Track[] = [];
     const maxLength = Math.max(
       brunoRes.tracks.length,

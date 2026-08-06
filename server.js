@@ -30,6 +30,22 @@ const streamUrlCache = new Map();
 const searchResultCache = new Map();
 
 /**
+ * 0. ROOT HEALTH ROUTE
+ */
+app.get('/', (req, res) => {
+  res.json({
+    status: 'online',
+    service: 'Glassify YouTube Music Hi-Fi Audio API',
+    version: '1.0.0',
+    endpoints: {
+      search: '/api/search?q=query',
+      streamAudio: '/api/stream-audio?id=videoId',
+      streamUrl: '/api/stream-url?id=videoId',
+    },
+  });
+});
+
+/**
  * Extract YouTube Stream URL for Format 140 (M4A AAC)
  */
 function getOrFetchStreamUrl(idOrQuery, queryHint, callback) {
