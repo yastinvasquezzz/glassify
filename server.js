@@ -10,7 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 app.use(cors({
   origin: '*',
@@ -20,7 +20,10 @@ app.use(cors({
 
 app.use(express.json());
 
-const YTDLP_PATH = path.join(__dirname, 'bin', 'yt-dlp.exe');
+const isWin = process.platform === 'win32';
+const YTDLP_PATH = isWin
+  ? path.join(__dirname, 'bin', 'yt-dlp.exe')
+  : (process.env.YTDLP_PATH || 'yt-dlp');
 
 // In-memory stream and search caches
 const streamUrlCache = new Map();
@@ -155,7 +158,6 @@ app.get('/api/stream-audio', (req, res) => {
         'Referer': 'https://music.youtube.com/',
       };
 
-      // Forward HTTP Range header for precise track seeking!
       if (req.headers.range) {
         reqHeaders['Range'] = req.headers.range;
       }
@@ -212,7 +214,9 @@ app.get('/api/stream-url', (req, res) => {
     if (err || !streamUrl) {
       return res.status(500).json({ error: 'Stream extraction failed' });
     }
-    return res.json({ streamUrl: `http://localhost:3001/api/stream-audio?id=${id}&q=${encodeURIComponent(queryHint || '')}` });
+    const host = req.get('host');
+    const protocol = req.protocol;
+    return res.json({ streamUrl: `${protocol}://${host}/api/stream-audio?id=${id}&q=${encodeURIComponent(queryHint || '')}` });
   });
 });
 
@@ -249,6 +253,8 @@ app.get('/api/search', (req, res) => {
       const rawTracks = [];
       const albumMap = new Map();
       const artistMap = new Map();
+      const host = req.get('host');
+      const protocol = req.protocol;
 
       lines.forEach((line) => {
         const parts = line.split('||');
@@ -278,7 +284,7 @@ app.get('/api/search', (req, res) => {
           album: albumTitle,
           albumId: albumKey,
           coverUrl,
-          audioUrl: `http://localhost:3001/api/stream-audio?id=${videoId}&q=${encodeURIComponent(title + ' ' + artist)}`,
+          audioUrl: `${protocol}://${host}/api/stream-audio?id=${videoId}&q=${encodeURIComponent(title + ' ' + artist)}`,
           duration,
           genre: 'YouTube Music Hits',
           dominantColor: `hsl(${Math.abs(videoId.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)) % 360}, 75%, 42%)`,
@@ -307,5 +313,5 @@ app.get('/api/search', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🎵 Glassify Range Seeking Enabled Audio Server active on http://localhost:${PORT}`);
+  console.log(`🎵 Glassify Range Seeking Enabled Audio Server active on port ${PORT}`);
 });
