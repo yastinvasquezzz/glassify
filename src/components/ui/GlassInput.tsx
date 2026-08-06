@@ -19,7 +19,7 @@ export const GlassInput = React.forwardRef<HTMLInputElement, GlassInputProps>(
           ref={ref}
           className={twMerge(
             clsx(
-              'glass-input w-full rounded-full py-2.5 text-sm placeholder-neutral-400 focus:placeholder-neutral-500',
+              'w-full rounded-full py-2.5 text-sm bg-white/10 text-white placeholder-neutral-400 backdrop-blur-xl border border-white/20 focus:outline-none focus:border-[#1db954] focus:ring-2 focus:ring-[#1db954]/30 shadow-inner transition-all duration-300',
               icon ? 'pl-10 pr-4' : 'px-4',
               className
             )
