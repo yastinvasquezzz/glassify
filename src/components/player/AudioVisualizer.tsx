@@ -9,59 +9,23 @@ export const AudioVisualizer: React.FC<{ bars?: number; height?: string }> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    const audioEl = document.querySelector('audio');
-    const win = typeof window !== 'undefined' ? (window as any) : null;
-
-    if (audioEl && win && !win.globalAudioCtx) {
-      try {
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioCtx) {
-          const ctx = new AudioCtx();
-          const analyser = ctx.createAnalyser();
-          analyser.fftSize = 64;
-          const source = ctx.createMediaElementSource(audioEl);
-          source.connect(analyser);
-          analyser.connect(ctx.destination);
-
-          win.globalAudioCtx = ctx;
-          win.globalAnalyser = analyser;
-          win.globalSource = source;
-        }
-      } catch (e) {
-        console.warn('AudioContext init notice:', e);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     let animationFrameId: number;
-    const dataArray = new Uint8Array(bars);
-    const win = typeof window !== 'undefined' ? (window as any) : null;
 
     const render = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const barWidth = canvas.width / bars - 2;
 
-      const analyser = win?.globalAnalyser;
-      if (isPlaying && analyser) {
-        analyser.getByteFrequencyData(dataArray);
-      }
-
       for (let i = 0; i < bars; i++) {
         let barHeight: number;
         if (isPlaying) {
-          if (analyser && dataArray[i] > 0) {
-            barHeight = (dataArray[i] / 255) * canvas.height;
-          } else {
-            const freq = Math.sin(Date.now() * 0.006 + i * 0.4) * 0.5 + 0.5;
-            const randomNoise = Math.random() * 0.25;
-            barHeight = (freq * 0.75 + randomNoise) * canvas.height;
-          }
+          const freq = Math.sin(Date.now() * 0.007 + i * 0.45) * 0.5 + 0.5;
+          const randomNoise = Math.random() * 0.25;
+          barHeight = (freq * 0.75 + randomNoise) * canvas.height;
         } else {
           barHeight = 4;
         }
