@@ -1,13 +1,25 @@
 import { Track, Album, Artist } from '../types';
 
-const BACKEND_URL = (import.meta as any).env?.VITE_BACKEND_URL || 'https://glassify-p280.onrender.com';
-
 // In-Memory search cache
 const searchCache = new Map<string, { tracks: Track[]; albums: Album[]; artists: Artist[] }>();
 
+function filterUniqueTracks(tracks: Track[]): Track[] {
+  const seen = new Set<string>();
+  const result: Track[] = [];
+
+  for (const t of tracks) {
+    const key = `${t.title.toLowerCase().replace(/[^a-z0-9]/g, '')}-${t.artist.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(t);
+    }
+  }
+  return result;
+}
+
 /**
- * Searches YouTube Music catalog via yt-dlp backend server on Render
- * Returns the EXACT official audio tracks extracted from YouTube Music
+ * 100% Client-Side Search Engine (0 Backend Dependencies)
+ * Queries public high-speed music catalog APIs directly from the browser
  */
 export const searchTracksFromApi = async (queryTerm: string): Promise<{
   tracks: Track[];
@@ -24,32 +36,55 @@ export const searchTracksFromApi = async (queryTerm: string): Promise<{
     return searchCache.get(cleanQuery)!;
   }
 
+  let tracks: Track[] = [];
+
   try {
-    const res = await fetch(`${BACKEND_URL}/api/search?q=${encodeURIComponent(queryTerm.trim())}`);
-    if (!res.ok) {
-      throw new Error(`Backend HTTP Error: ${res.status}`);
+    const iTunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(queryTerm.trim())}&entity=song&limit=25`;
+    const res = await fetch(iTunesUrl);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.results && data.results.length > 0) {
+        tracks = data.results.map((item: any) => {
+          const title = item.trackName || 'Canción';
+          const artist = item.artistName || 'Artista';
+          const coverUrl = (item.artworkUrl100 || '').replace('100x100bb', '600x600bb');
+          const duration = Math.round((item.trackTimeMillis || 210000) / 1000);
+
+          return {
+            id: `track-${item.trackId || item.collectionId}`,
+            videoId: `${artist} - ${title}`,
+            title,
+            artist,
+            artistId: `artist-${encodeURIComponent(artist)}`,
+            album: item.collectionName || 'Álbum',
+            albumId: `album-${item.collectionId}`,
+            coverUrl,
+            audioUrl: item.previewUrl || '',
+            duration,
+            genre: item.primaryGenreName || 'Música Hi-Fi',
+            dominantColor: `hsl(${Math.abs((title + artist).split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0)) % 360}, 75%, 42%)`,
+            explicit: item.trackExplicitness === 'explicit',
+            playCount: 5000000,
+          };
+        });
+      }
     }
-
-    const data = await res.json();
-    const result = {
-      tracks: data.tracks || [],
-      albums: data.albums || [],
-      artists: data.artists || [],
-    };
-
-    if (result.tracks.length > 0) {
-      searchCache.set(cleanQuery, result);
-    }
-
-    return result;
-  } catch (error) {
-    console.error('Error fetching from YouTube Music backend:', error);
-    return { tracks: [], albums: [], artists: [] };
+  } catch (e) {
+    console.warn('Client-side search notice:', e);
   }
+
+  const uniqueTracks = filterUniqueTracks(tracks);
+  const result = { tracks: uniqueTracks, albums: [], artists: [] };
+
+  if (uniqueTracks.length > 0) {
+    searchCache.set(cleanQuery, result);
+  }
+
+  return result;
 };
 
 /**
- * Fetch top trending YouTube Music songs across a DIVERSE array of top global artists
+ * Fetch top trending songs across top global artists directly in browser
  */
 export const fetchTopTrendingTracks = async (): Promise<{
   trending: Track[];
