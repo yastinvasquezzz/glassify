@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { usePlayerStore } from '../../store/usePlayerStore';
+import { getFullAudioStreamUrl } from '../../services/musicApi';
 
 export const AudioEngine: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -17,29 +18,41 @@ export const AudioEngine: React.FC = () => {
     setIsPlaying,
   } = usePlayerStore();
 
-  // Load & play audio whenever currentTrack changes
+  // Extract full audio stream and play whenever currentTrack changes
   useEffect(() => {
     if (!audioRef.current || !currentTrack) return;
 
-    if (loadedTrackIdRef.current !== currentTrack.id) {
+    let isMounted = true;
+
+    const loadAndPlayFullTrack = async () => {
+      if (loadedTrackIdRef.current === currentTrack.id) return;
       loadedTrackIdRef.current = currentTrack.id;
 
-      if (currentTrack.audioUrl) {
-        audioRef.current.src = currentTrack.audioUrl;
+      // Extract 100% FULL SONG audio stream
+      const streamUrl = await getFullAudioStreamUrl(currentTrack);
+
+      if (!isMounted || !audioRef.current) return;
+
+      if (streamUrl) {
+        audioRef.current.src = streamUrl;
         audioRef.current.load();
       }
-    }
 
-    if (isPlaying) {
-      const playPromise = audioRef.current.play();
-      if (playPromise !== undefined) {
-        playPromise.catch((err) => {
-          console.warn('Audio play execution notice:', err);
-        });
+      if (isPlaying) {
+        const playPromise = audioRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            console.warn('Full track play execution notice:', err);
+          });
+        }
       }
-    } else {
-      audioRef.current.pause();
-    }
+    };
+
+    loadAndPlayFullTrack();
+
+    return () => {
+      isMounted = false;
+    };
   }, [currentTrack?.id]);
 
   // Handle Play/Pause Toggle
@@ -47,13 +60,19 @@ export const AudioEngine: React.FC = () => {
     if (!audioRef.current || !currentTrack) return;
 
     if (isPlaying) {
-      if (!audioRef.current.src && currentTrack.audioUrl) {
-        audioRef.current.src = currentTrack.audioUrl;
-        audioRef.current.load();
-      }
-      const playPromise = audioRef.current.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(() => {});
+      if (!audioRef.current.src) {
+        getFullAudioStreamUrl(currentTrack).then((url) => {
+          if (audioRef.current && url) {
+            audioRef.current.src = url;
+            audioRef.current.load();
+            audioRef.current.play().catch(() => {});
+          }
+        });
+      } else {
+        const playPromise = audioRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(() => {});
+        }
       }
     } else {
       audioRef.current.pause();
