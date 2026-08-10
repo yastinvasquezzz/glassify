@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { usePlayerStore } from '../../store/usePlayerStore';
 
+const RENDER_BACKEND = 'https://glassify-p280.onrender.com';
+
 declare global {
   interface Window {
     onYouTubeIframeAPIReady?: () => void;
@@ -29,8 +31,11 @@ export const AudioEngine: React.FC = () => {
 
   const extractCleanVideoId = (t: typeof currentTrack): string | null => {
     if (!t) return null;
-    if (t.videoId) return t.videoId;
-    if (t.id && t.id.startsWith('yt-')) return t.id.replace(/^yt-/, '');
+    if (t.videoId && /^[a-zA-Z0-9_-]{11}$/.test(t.videoId)) return t.videoId;
+    if (t.id && t.id.startsWith('yt-')) {
+      const clean = t.id.replace(/^yt-/, '');
+      if (/^[a-zA-Z0-9_-]{11}$/.test(clean)) return clean;
+    }
     if (t.audioUrl && t.audioUrl.includes('watch?v=')) {
       const match = t.audioUrl.match(/watch\?v=([a-zA-Z0-9_-]{11})/);
       if (match) return match[1];
@@ -38,7 +43,7 @@ export const AudioEngine: React.FC = () => {
     return null;
   };
 
-  // Load YouTube IFrame API script
+  // Load YouTube IFrame API script in background
   useEffect(() => {
     if (window.YT && window.YT.Player) {
       initYtPlayer();
@@ -68,7 +73,7 @@ export const AudioEngine: React.FC = () => {
         width: '1',
         videoId: '',
         playerVars: {
-          autoplay: 0,
+          autoplay: 1,
           controls: 0,
           disablekb: 1,
           fs: 0,
@@ -78,12 +83,8 @@ export const AudioEngine: React.FC = () => {
         events: {
           onReady: () => {
             isYtReadyRef.current = true;
-            if (currentTrack) {
-              playCurrentTrack();
-            }
           },
           onStateChange: (event: any) => {
-            // YT.PlayerState.ENDED === 0
             if (event.data === 0) {
               nextTrack();
             } else if (event.data === 1) {
@@ -94,40 +95,84 @@ export const AudioEngine: React.FC = () => {
           },
         },
       });
-    } catch (e) {
-      console.warn('YouTube IFrame player initialization notice:', e);
-    }
+    } catch (e) {}
   };
 
   const playCurrentTrack = () => {
     if (!currentTrack) return;
-    const videoId = extractCleanVideoId(currentTrack);
 
-    if (videoId && playerRef.current && isYtReadyRef.current && typeof playerRef.current.loadVideoById === 'function') {
-      if (loadedTrackIdRef.current !== currentTrack.id) {
-        loadedTrackIdRef.current = currentTrack.id;
-        if (isPlaying) {
-          playerRef.current.loadVideoById(videoId);
-        } else {
-          playerRef.current.cueVideoById(videoId);
-        }
-      } else {
-        if (isPlaying) {
-          playerRef.current.playVideo();
-        } else {
-          playerRef.current.pauseVideo();
-        }
-      }
-    } else if (audioRef.current && currentTrack.audioUrl && !currentTrack.audioUrl.includes('youtube.com')) {
+    const videoId = extractCleanVideoId(currentTrack);
+    const isDirectAudio = currentTrack.audioUrl && (
+      currentTrack.audioUrl.includes('mzstatic.com') ||
+      currentTrack.audioUrl.includes('.mp3') ||
+      currentTrack.audioUrl.includes('.m4a') ||
+      currentTrack.audioUrl.includes('.mp4') ||
+      currentTrack.audioUrl.includes('stream-audio')
+    );
+
+    // 1. Direct HTML5 Audio Playback (for iTunes & Direct Stream Proxies)
+    if (audioRef.current && (isDirectAudio || !videoId)) {
       if (loadedTrackIdRef.current !== currentTrack.id) {
         loadedTrackIdRef.current = currentTrack.id;
         audioRef.current.src = currentTrack.audioUrl;
         audioRef.current.load();
       }
+
       if (isPlaying) {
-        audioRef.current.play().catch(() => {});
+        const p = audioRef.current.play();
+        if (p !== undefined) {
+          p.catch(() => {
+            // If direct URL fails, fallback to cloud stream
+            if (videoId && audioRef.current) {
+              audioRef.current.src = `${RENDER_BACKEND}/api/stream-audio?id=${videoId}`;
+              audioRef.current.play().catch(() => {});
+            }
+          });
+        }
       } else {
         audioRef.current.pause();
+      }
+      return;
+    }
+
+    // 2. Cloud Stream & YouTube Player Playback
+    if (videoId) {
+      if (audioRef.current) {
+        const streamUrl = `${RENDER_BACKEND}/api/stream-audio?id=${videoId}&q=${encodeURIComponent(currentTrack.title + ' ' + currentTrack.artist)}`;
+        if (loadedTrackIdRef.current !== currentTrack.id) {
+          loadedTrackIdRef.current = currentTrack.id;
+          audioRef.current.src = streamUrl;
+          audioRef.current.load();
+        }
+
+        if (isPlaying) {
+          const p = audioRef.current.play();
+          if (p !== undefined) {
+            p.catch(() => {
+              // Fallback to YouTube Iframe
+              if (playerRef.current && isYtReadyRef.current && typeof playerRef.current.loadVideoById === 'function') {
+                playerRef.current.loadVideoById(videoId);
+              }
+            });
+          }
+        } else {
+          audioRef.current.pause();
+        }
+      } else if (playerRef.current && isYtReadyRef.current && typeof playerRef.current.loadVideoById === 'function') {
+        if (loadedTrackIdRef.current !== currentTrack.id) {
+          loadedTrackIdRef.current = currentTrack.id;
+          if (isPlaying) {
+            playerRef.current.loadVideoById(videoId);
+          } else {
+            playerRef.current.cueVideoById(videoId);
+          }
+        } else {
+          if (isPlaying) {
+            playerRef.current.playVideo();
+          } else {
+            playerRef.current.pauseVideo();
+          }
+        }
       }
     }
   };
@@ -140,17 +185,10 @@ export const AudioEngine: React.FC = () => {
   // Sync state when isPlaying changes
   useEffect(() => {
     if (!currentTrack) return;
-    const videoId = extractCleanVideoId(currentTrack);
-
-    if (videoId && playerRef.current && isYtReadyRef.current && typeof playerRef.current.playVideo === 'function') {
+    if (audioRef.current) {
       if (isPlaying) {
-        playerRef.current.playVideo();
-      } else {
-        playerRef.current.pauseVideo();
-      }
-    } else if (audioRef.current && currentTrack.audioUrl && !currentTrack.audioUrl.includes('youtube.com')) {
-      if (isPlaying) {
-        audioRef.current.play().catch(() => {});
+        const p = audioRef.current.play();
+        if (p !== undefined) p.catch(() => {});
       } else {
         audioRef.current.pause();
       }
@@ -160,14 +198,7 @@ export const AudioEngine: React.FC = () => {
   // Sync seeking time
   useEffect(() => {
     if (!currentTrack) return;
-    const videoId = extractCleanVideoId(currentTrack);
-
-    if (videoId && playerRef.current && isYtReadyRef.current && typeof playerRef.current.getCurrentTime === 'function') {
-      const ytTime = playerRef.current.getCurrentTime() || 0;
-      if (Math.abs(ytTime - currentTime) > 2) {
-        playerRef.current.seekTo(currentTime, true);
-      }
-    } else if (audioRef.current) {
+    if (audioRef.current) {
       if (Math.abs(audioRef.current.currentTime - currentTime) > 2) {
         audioRef.current.currentTime = currentTime;
       }
@@ -176,26 +207,26 @@ export const AudioEngine: React.FC = () => {
 
   // Sync volume & mute
   useEffect(() => {
-    const targetVol = isMuted ? 0 : Math.round(volume * 100);
-
-    if (playerRef.current && isYtReadyRef.current && typeof playerRef.current.setVolume === 'function') {
-      playerRef.current.setVolume(targetVol);
-      if (isMuted) {
-        playerRef.current.mute();
-      } else {
-        playerRef.current.unMute();
-      }
-    }
-
     if (audioRef.current) {
       audioRef.current.volume = isMuted ? 0 : volume;
+    }
+    if (playerRef.current && isYtReadyRef.current && typeof playerRef.current.setVolume === 'function') {
+      const targetVol = isMuted ? 0 : Math.round(volume * 100);
+      playerRef.current.setVolume(targetVol);
     }
   }, [volume, isMuted]);
 
   // Sync progress & duration loop
   useEffect(() => {
     syncIntervalRef.current = setInterval(() => {
-      if (playerRef.current && isYtReadyRef.current && typeof playerRef.current.getCurrentTime === 'function') {
+      if (audioRef.current) {
+        if (audioRef.current.currentTime > 0) {
+          setCurrentTime(audioRef.current.currentTime);
+        }
+        if (audioRef.current.duration && !isNaN(audioRef.current.duration)) {
+          setDuration(audioRef.current.duration);
+        }
+      } else if (playerRef.current && isYtReadyRef.current && typeof playerRef.current.getCurrentTime === 'function') {
         const ytTime = playerRef.current.getCurrentTime();
         const ytDur = playerRef.current.getDuration();
         if (ytTime !== undefined && !isNaN(ytTime) && ytTime > 0) {
@@ -204,13 +235,8 @@ export const AudioEngine: React.FC = () => {
         if (ytDur !== undefined && !isNaN(ytDur) && ytDur > 0) {
           setDuration(ytDur);
         }
-      } else if (audioRef.current) {
-        setCurrentTime(audioRef.current.currentTime || 0);
-        if (audioRef.current.duration) {
-          setDuration(audioRef.current.duration);
-        }
       }
-    }, 300);
+    }, 250);
 
     return () => {
       if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
@@ -242,7 +268,7 @@ export const AudioEngine: React.FC = () => {
         className="fixed -bottom-96 -right-96 w-1 h-1 opacity-0 pointer-events-none overflow-hidden"
       />
 
-      {/* HTML5 Audio Element Fallback */}
+      {/* Primary Hi-Fi HTML5 Audio Element */}
       <audio
         ref={audioRef}
         crossOrigin="anonymous"
