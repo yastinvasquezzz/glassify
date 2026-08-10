@@ -3,8 +3,18 @@
 @tailwind utilities;
 
 @layer base {
-  body {
-    @apply bg-black text-white antialiased overflow-hidden select-none;
+  html, body {
+    touch-action: manipulation;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    overscroll-behavior: none;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    position: fixed;
+    inset: 0;
+    @apply bg-black text-white antialiased select-none;
   }
 }
 
@@ -67,8 +77,8 @@
 
 /* Scrollbar Customization */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
@@ -76,7 +86,7 @@
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.18);
   border-radius: 9999px;
 }
 
