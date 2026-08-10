@@ -45,8 +45,7 @@ function filterUniqueTracks(tracks: Track[]): Track[] {
 }
 
 /**
- * 100% Client-Side YouTube Music Search
- * Queries public high-speed CORS music APIs directly from the browser without any backend
+ * 100% Client-Side Music Search with CORS-friendly Public APIs & iTunes Fallback
  */
 export const searchTracksFromApi = async (queryTerm: string): Promise<{
   tracks: Track[];
@@ -63,86 +62,88 @@ export const searchTracksFromApi = async (queryTerm: string): Promise<{
     return searchCache.get(cleanQuery)!;
   }
 
-  const publicInstances = [
-    'https://inv.tux.pizza/api/v1/search',
-    'https://vid.puffyan.us/api/v1/search',
-    'https://invidious.drgns.space/api/v1/search',
-    'https://invidious.nerdvpn.de/api/v1/search',
-  ];
-
-  let rawItems: any[] = [];
-
-  // Try Client-Side Public Music Search Instances
-  for (const endpoint of publicInstances) {
-    try {
-      const url = `${endpoint}?q=${encodeURIComponent(queryTerm.trim() + ' official audio')}&type=video`;
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
-          rawItems = data;
-          break;
-        }
-      }
-    } catch (err) {
-      // Try next public instance
-    }
-  }
-
   let tracks: Track[] = [];
 
-  if (rawItems.length > 0) {
-    tracks = rawItems.map((item) => {
-      const videoId = item.videoId;
-      const { title, artist } = parseTitleAndArtist(item.title || '', item.author || '');
-      const coverUrl = item.videoThumbnails && item.videoThumbnails[0]
-        ? item.videoThumbnails[0].url
-        : `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+  // Primary 1: iTunes Public Search API (100% CORS Allowed & Never Blocked by AdBlockers)
+  try {
+    const iTunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(queryTerm.trim())}&entity=song&limit=25`;
+    const iTunesRes = await fetch(iTunesUrl);
+    if (iTunesRes.ok) {
+      const iTunesData = await iTunesRes.json();
+      if (iTunesData.results && iTunesData.results.length > 0) {
+        tracks = iTunesData.results.map((item: any) => {
+          const trackId = `yt-${item.trackId || item.collectionId}`;
+          const title = item.trackName || 'Canción';
+          const artist = item.artistName || 'Artista';
+          const coverUrl = (item.artworkUrl100 || '').replace('100x100bb', '600x600bb');
+          const duration = Math.round((item.trackTimeMillis || 210000) / 1000);
 
-      return {
-        id: `yt-${videoId}`,
-        videoId,
-        title,
-        artist,
-        artistId: `artist-${encodeURIComponent(artist)}`,
-        album: `Álbum - ${title}`,
-        albumId: `album-${artist}`,
-        coverUrl,
-        audioUrl: `https://www.youtube.com/watch?v=${videoId}`,
-        duration: item.lengthSeconds || 210,
-        genre: 'YouTube Music Hits',
-        dominantColor: `hsl(${Math.abs(videoId.split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0)) % 360}, 75%, 42%)`,
-        explicit: false,
-        playCount: item.viewCount || 1000000,
-      };
-    });
-  } else {
-    // Client-Side iTunes API Fallback
-    try {
-      const iTunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(queryTerm.trim())}&entity=song&limit=20`;
-      const iTunesRes = await fetch(iTunesUrl);
-      if (iTunesRes.ok) {
-        const iTunesData = await iTunesRes.json();
-        if (iTunesData.results && iTunesData.results.length > 0) {
-          tracks = iTunesData.results.map((item: any) => ({
-            id: `yt-${item.trackId || item.collectionId}`,
-            videoId: `yt-${item.trackId || item.collectionId}`,
-            title: item.trackName || 'Canción',
-            artist: item.artistName || 'Artista',
-            artistId: `artist-${encodeURIComponent(item.artistName || '')}`,
+          return {
+            id: trackId,
+            videoId: `${artist} - ${title}`,
+            title,
+            artist,
+            artistId: `artist-${encodeURIComponent(artist)}`,
             album: item.collectionName || 'Álbum',
             albumId: `album-${item.collectionId}`,
-            coverUrl: (item.artworkUrl100 || '').replace('100x100bb', '600x600bb'),
+            coverUrl,
             audioUrl: item.previewUrl || '',
-            duration: Math.round((item.trackTimeMillis || 210000) / 1000),
+            duration,
             genre: item.primaryGenreName || 'Música Hi-Fi',
-            dominantColor: 'hsl(160, 84%, 39%)',
+            dominantColor: `hsl(${Math.abs((title + artist).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)) % 360}, 75%, 42%)`,
             explicit: item.trackExplicitness === 'explicit',
             playCount: 5000000,
-          }));
-        }
+          };
+        });
       }
-    } catch (e) {}
+    }
+  } catch (e) {
+    console.warn('iTunes API notice:', e);
+  }
+
+  // Primary 2: Piped & Invidious Public Instances (For Video IDs)
+  if (tracks.length === 0) {
+    const publicInstances = [
+      'https://pipedapi.kavin.rocks/search?q=',
+      'https://inv.tux.pizza/api/v1/search?q=',
+      'https://vid.puffyan.us/api/v1/search?q=',
+    ];
+
+    for (const endpoint of publicInstances) {
+      try {
+        const url = `${endpoint}${encodeURIComponent(queryTerm.trim() + ' official audio')}&type=video`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          const items = Array.isArray(data) ? data : (data.items || []);
+          if (items.length > 0) {
+            tracks = items.slice(0, 20).map((item: any) => {
+              const videoId = item.videoId || (item.url ? item.url.replace('/watch?v=', '') : '');
+              const { title, artist } = parseTitleAndArtist(item.title || '', item.uploaderName || item.author || '');
+              const coverUrl = item.thumbnail || (item.videoThumbnails && item.videoThumbnails[0] ? item.videoThumbnails[0].url : `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`);
+
+              return {
+                id: `yt-${videoId}`,
+                videoId,
+                title,
+                artist,
+                artistId: `artist-${encodeURIComponent(artist)}`,
+                album: `Álbum - ${title}`,
+                albumId: `album-${artist}`,
+                coverUrl,
+                audioUrl: `https://www.youtube.com/watch?v=${videoId}`,
+                duration: item.duration || item.lengthSeconds || 210,
+                genre: 'YouTube Music Hits',
+                dominantColor: `hsl(${Math.abs((title + artist).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)) % 360}, 75%, 42%)`,
+                explicit: false,
+                playCount: item.views || 1000000,
+              };
+            });
+            break;
+          }
+        }
+      } catch (err) {}
+    }
   }
 
   const uniqueTracks = filterUniqueTracks(tracks);
