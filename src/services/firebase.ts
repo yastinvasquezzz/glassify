@@ -99,10 +99,12 @@ export const signupWithEmail = async (email: string, pass: string, displayName: 
 };
 
 export const logoutUser = async () => {
-  await signOut(auth);
+  try {
+    await signOut(auth);
+  } catch (e) {}
 };
 
-// Init User Profile document in Cloud Firestore
+// Init User Profile document in Cloud Firestore (AdBlocker resilient)
 export const initUserProfileDoc = async (user: FirebaseUser) => {
   if (!user) return;
   try {
@@ -122,49 +124,49 @@ export const initUserProfileDoc = async (user: FirebaseUser) => {
       });
     }
   } catch (err) {
-    console.warn('Firestore doc init notice:', err);
+    // Silent catch if AdBlocker blocks firestore.googleapis.com
   }
 };
 
-// Sync Liked Tracks (Full objects + IDs) to Cloud Firestore under users/{uid}
+// Sync Liked Tracks (Full objects + IDs) to Cloud Firestore
 export const syncLikedSongsToFirestore = async (uid: string, likedTracks: Track[]) => {
   try {
     const userRef = doc(db, 'users', uid);
     const likedTrackIds = likedTracks.map((t) => t.id);
     await setDoc(userRef, { likedTracks, likedTrackIds }, { merge: true });
   } catch (err) {
-    console.error('Error syncing liked songs to Firestore:', err);
+    // Silent catch if AdBlocker blocks network request
   }
 };
 
-// Sync Recently Played Songs (Top 5) to Cloud Firestore under users/{uid}
+// Sync Recently Played Songs (Top 5) to Cloud Firestore
 export const syncRecentlyPlayedToFirestore = async (uid: string, recentlyPlayed: Track[]) => {
   try {
     const userRef = doc(db, 'users', uid);
     const top5 = recentlyPlayed.slice(0, 5);
     await setDoc(userRef, { recentlyPlayed: top5 }, { merge: true });
   } catch (err) {
-    console.error('Error syncing recently played to Firestore:', err);
+    // Silent catch if AdBlocker blocks network request
   }
 };
 
-// Save a Playlist to Cloud Firestore under users/{uid}/playlists/{playlistId}
+// Save a Playlist to Cloud Firestore
 export const savePlaylistToFirestore = async (uid: string, playlist: Playlist) => {
   try {
     const playlistRef = doc(db, 'users', uid, 'playlists', playlist.id);
     await setDoc(playlistRef, playlist, { merge: true });
   } catch (err) {
-    console.error('Error saving playlist to Firestore:', err);
+    // Silent catch if AdBlocker blocks network request
   }
 };
 
-// Delete a Playlist from Cloud Firestore under users/{uid}/playlists/{playlistId}
+// Delete a Playlist from Cloud Firestore
 export const deletePlaylistFromFirestore = async (uid: string, playlistId: string) => {
   try {
     const playlistRef = doc(db, 'users', uid, 'playlists', playlistId);
     await deleteDoc(playlistRef);
   } catch (err) {
-    console.error('Error deleting playlist from Firestore:', err);
+    // Silent catch if AdBlocker blocks network request
   }
 };
 
@@ -173,30 +175,40 @@ export const listenToUserPlaylists = (uid: string, callback: (playlists: Playlis
   try {
     const playlistsCol = collection(db, 'users', uid, 'playlists');
     const q = query(playlistsCol);
-    return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
-      const playlists: Playlist[] = [];
-      snapshot.forEach((docSnap) => {
-        playlists.push(docSnap.data() as Playlist);
-      });
-      callback(playlists);
-    });
+    return onSnapshot(
+      q,
+      (snapshot: QuerySnapshot<DocumentData>) => {
+        const playlists: Playlist[] = [];
+        snapshot.forEach((docSnap) => {
+          playlists.push(docSnap.data() as Playlist);
+        });
+        callback(playlists);
+      },
+      (err) => {
+        // Silent error handler for AdBlocker blocks
+      }
+    );
   } catch (err) {
-    console.error('Error setting up playlists listener:', err);
     return () => {};
   }
 };
 
-// Real-time listener for User Profile Data (Liked Songs & Recently Played) in Cloud Firestore
+// Real-time listener for User Profile Data in Cloud Firestore
 export const listenToUserData = (uid: string, callback: (data: DocumentData) => void) => {
   try {
     const userRef = doc(db, 'users', uid);
-    return onSnapshot(userRef, (snap) => {
-      if (snap.exists()) {
-        callback(snap.data());
+    return onSnapshot(
+      userRef,
+      (snap) => {
+        if (snap.exists()) {
+          callback(snap.data());
+        }
+      },
+      (err) => {
+        // Silent error handler for AdBlocker blocks
       }
-    });
+    );
   } catch (err) {
-    console.error('Error listening to user data:', err);
     return () => {};
   }
 };
