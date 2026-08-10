@@ -4,6 +4,7 @@ import { execFile } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import https from 'https';
+import http from 'http';
 import { URL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -46,7 +47,106 @@ app.get('/', (req, res) => {
 });
 
 /**
- * Extract YouTube Stream URL for Format 140 (M4A AAC)
+ * Helper: Fetch JSON via HTTPS
+ */
+function fetchHttpsJson(urlStr) {
+  return new Promise((resolve, reject) => {
+    try {
+      const parsedUrl = new URL(urlStr);
+      const reqOpts = {
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || 443,
+        path: parsedUrl.pathname + parsedUrl.search,
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'application/json',
+        },
+      };
+
+      const req = https.request(reqOpts, (res) => {
+        let body = '';
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              resolve(JSON.parse(body));
+            } catch (e) {
+              reject(e);
+            }
+          } else {
+            reject(new Error(`HTTP ${res.statusCode}`));
+          }
+        });
+      });
+
+      req.on('error', (err) => reject(err));
+      req.setTimeout(8000, () => {
+        req.destroy();
+        reject(new Error('Request timeout'));
+      });
+      req.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+/**
+ * Fallback HTTPS Search via Invidious instances
+ */
+async function fallbackHttpsSearch(queryTerm) {
+  const instances = [
+    'https://inv.tux.pizza',
+    'https://vid.puffyan.us',
+    'https://invidious.drgns.space',
+    'https://invidious.nerdvpn.de',
+  ];
+
+  for (const instance of instances) {
+    try {
+      const searchUrl = `${instance}/api/v1/search?q=${encodeURIComponent(queryTerm + ' official audio')}&type=video`;
+      const data = await fetchHttpsJson(searchUrl);
+      if (Array.isArray(data) && data.length > 0) {
+        return data;
+      }
+    } catch (e) {
+      // Try next instance silently
+    }
+  }
+  return [];
+}
+
+/**
+ * Fallback Audio Stream URL Fetcher
+ */
+async function fallbackHttpsStreamUrl(videoId) {
+  const instances = [
+    'https://inv.tux.pizza',
+    'https://vid.puffyan.us',
+    'https://invidious.drgns.space',
+  ];
+
+  for (const instance of instances) {
+    try {
+      const infoUrl = `${instance}/api/v1/videos/${videoId}`;
+      const data = await fetchHttpsJson(infoUrl);
+      if (data && Array.isArray(data.adaptiveFormats)) {
+        const audioFormat = data.adaptiveFormats.find(
+          (f) => f.type && f.type.includes('audio') && (f.container === 'm4a' || f.container === 'mp4')
+        ) || data.adaptiveFormats.find((f) => f.type && f.type.includes('audio'));
+
+        if (audioFormat && audioFormat.url) {
+          return audioFormat.url;
+        }
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
+/**
+ * Extract YouTube Stream URL for Format 140 (M4A AAC) with Fallback
  */
 function getOrFetchStreamUrl(idOrQuery, queryHint, callback) {
   if (!idOrQuery) return callback(new Error('Missing idOrQuery'));
@@ -70,7 +170,7 @@ function getOrFetchStreamUrl(idOrQuery, queryHint, callback) {
     targetTerm,
   ];
 
-  execFile(YTDLP_PATH, args, (error, stdout) => {
+  execFile(YTDLP_PATH, args, async (error, stdout) => {
     if (!error && stdout.trim()) {
       const streamUrl = stdout.trim().split('\n')[0];
       streamUrlCache.set(cacheKey, {
@@ -80,21 +180,19 @@ function getOrFetchStreamUrl(idOrQuery, queryHint, callback) {
       return callback(null, streamUrl);
     }
 
-    const fallbackTerm = `ytsearch1:${queryHint || cleanId} official audio`;
-    const fallbackArgs = ['-g', '-f', '140/m4a/bestaudio', fallbackTerm];
-
-    execFile(YTDLP_PATH, fallbackArgs, (fbErr, fbStdout) => {
-      if (!fbErr && fbStdout.trim()) {
-        const streamUrl = fbStdout.trim().split('\n')[0];
+    // Try HTTPS Fallback
+    if (isVideoId) {
+      const fallbackUrl = await fallbackHttpsStreamUrl(cleanId);
+      if (fallbackUrl) {
         streamUrlCache.set(cacheKey, {
-          url: streamUrl,
+          url: fallbackUrl,
           expiresAt: Date.now() + 4 * 60 * 60 * 1000,
         });
-        return callback(null, streamUrl);
+        return callback(null, fallbackUrl);
       }
+    }
 
-      return callback(fbErr || new Error('Stream extraction failed'));
-    });
+    return callback(error || new Error('Stream extraction failed'));
   });
 }
 
@@ -142,7 +240,6 @@ function sinVersionesRepetidas(canciones) {
 
 /**
  * 1. HIGH-PERFORMANCE AUDIO STREAM PROXY WITH FULL HTTP RANGE & SEEKING SUPPORT
- * Forwards Range header to YouTube CDN and returns 206 Partial Content for instant seeking
  */
 app.options('/api/stream-audio', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -178,15 +275,16 @@ app.get('/api/stream-audio', (req, res) => {
         reqHeaders['Range'] = req.headers.range;
       }
 
+      const transport = parsedUrl.protocol === 'http:' ? http : https;
       const options = {
         hostname: parsedUrl.hostname,
-        port: 443,
+        port: parsedUrl.port || (parsedUrl.protocol === 'http:' ? 80 : 443),
         path: parsedUrl.pathname + parsedUrl.search,
         method: 'GET',
         headers: reqHeaders,
       };
 
-      const proxyReq = https.request(options, (proxyRes) => {
+      const proxyReq = transport.request(options, (proxyRes) => {
         const resHeaders = {
           'Content-Type': proxyRes.headers['content-type'] || 'audio/mp4',
           'Accept-Ranges': 'bytes',
@@ -237,7 +335,7 @@ app.get('/api/stream-url', (req, res) => {
 });
 
 /**
- * 3. ULTRA-FAST SEARCH ENDPOINT (/api/search)
+ * 3. ULTRA-FAST DUAL-LAYER SEARCH ENDPOINT (/api/search)
  */
 app.get('/api/search', (req, res) => {
   const query = req.query.q;
@@ -251,6 +349,9 @@ app.get('/api/search', (req, res) => {
     return res.json(searchResultCache.get(cleanQuery));
   }
 
+  const host = req.get('host');
+  const protocol = req.protocol;
+
   const searchTerm = `ytsearch25:music.youtube.com ${query} official audio`;
   const args = [
     '--flat-playlist',
@@ -258,76 +359,99 @@ app.get('/api/search', (req, res) => {
     searchTerm,
   ];
 
-  execFile(YTDLP_PATH, args, (error, stdout) => {
-    if (error) {
-      console.error('yt-dlp search error:', error);
-      return res.status(500).json({ error: 'Failed to search YouTube Music' });
+  execFile(YTDLP_PATH, args, async (error, stdout) => {
+    if (!error && stdout.trim()) {
+      try {
+        const lines = stdout.trim().split('\n').filter(Boolean);
+        const rawTracks = [];
+
+        lines.forEach((line) => {
+          const parts = line.split('||');
+          if (parts.length < 2) return;
+
+          const videoId = parts[0].trim();
+          const rawTitle = parts[1].trim();
+          const uploader = parts[2] ? parts[2].trim() : 'Artista';
+          const duration = parts[3] && !isNaN(parseFloat(parts[3])) ? parseFloat(parts[3]) : 210;
+          const viewCount = parts[4] && !isNaN(parseInt(parts[4], 10)) ? parseInt(parts[4], 10) : 1000000;
+
+          if (/\b(reaction|review|vlog|amv|cover by|dance cover|guitar cover|piano cover|instrumental cover|tutorial)\b/i.test(rawTitle)) {
+            return;
+          }
+
+          const { title, artist } = parseTitleAndArtist(rawTitle, uploader);
+          const coverUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+
+          rawTracks.push({
+            id: `yt-${videoId}`,
+            videoId,
+            title,
+            artist,
+            artistId: `artist-${encodeURIComponent(artist)}`,
+            album: `Álbum - ${title}`,
+            albumId: `album-${artist}`,
+            coverUrl,
+            audioUrl: `${protocol}://${host}/api/stream-audio?id=${videoId}&q=${encodeURIComponent(title + ' ' + artist)}`,
+            duration,
+            genre: 'YouTube Music Hits',
+            dominantColor: `hsl(${Math.abs(videoId.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)) % 360}, 75%, 42%)`,
+            explicit: false,
+            playCount: viewCount,
+          });
+        });
+
+        const tracks = sinVersionesRepetidas(rawTracks);
+        const responseObj = { tracks, albums: [], artists: [] };
+        if (tracks.length > 0) {
+          searchResultCache.set(cleanQuery, responseObj);
+          return res.json(responseObj);
+        }
+      } catch (e) {}
     }
 
+    // HTTPS DUAL-LAYER FALLBACK IF YT-DLP FAILS OR IS MISSING ON RENDER
     try {
-      const lines = stdout.trim().split('\n').filter(Boolean);
-      const rawTracks = [];
-      const albumMap = new Map();
-      const artistMap = new Map();
-      const host = req.get('host');
-      const protocol = req.protocol;
+      const items = await fallbackHttpsSearch(cleanQuery);
+      const rawTracks = items.map((item) => {
+        const videoId = item.videoId;
+        const rawTitle = item.title || '';
+        const author = item.author || 'Artista';
+        const duration = item.lengthSeconds || 210;
 
-      lines.forEach((line) => {
-        const parts = line.split('||');
-        if (parts.length < 2) return;
+        const { title, artist } = parseTitleAndArtist(rawTitle, author);
+        const coverUrl = item.videoThumbnails && item.videoThumbnails[0]
+          ? item.videoThumbnails[0].url
+          : `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
 
-        const videoId = parts[0].trim();
-        const rawTitle = parts[1].trim();
-        const uploader = parts[2] ? parts[2].trim() : 'Artista';
-        const duration = parts[3] && !isNaN(parseFloat(parts[3])) ? parseFloat(parts[3]) : 210;
-        const viewCount = parts[4] && !isNaN(parseInt(parts[4], 10)) ? parseInt(parts[4], 10) : 1000000;
-
-        if (/\b(reaction|review|vlog|amv|cover by|dance cover|guitar cover|piano cover|instrumental cover|tutorial)\b/i.test(rawTitle)) {
-          return;
-        }
-
-        const { title, artist } = parseTitleAndArtist(rawTitle, uploader);
-        const coverUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-        const albumTitle = `Álbum - ${title}`;
-        const albumKey = `album-${artist}`;
-
-        const track = {
+        return {
           id: `yt-${videoId}`,
           videoId,
           title,
           artist,
           artistId: `artist-${encodeURIComponent(artist)}`,
-          album: albumTitle,
-          albumId: albumKey,
+          album: `Álbum - ${title}`,
+          albumId: `album-${artist}`,
           coverUrl,
           audioUrl: `${protocol}://${host}/api/stream-audio?id=${videoId}&q=${encodeURIComponent(title + ' ' + artist)}`,
           duration,
           genre: 'YouTube Music Hits',
           dominantColor: `hsl(${Math.abs(videoId.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)) % 360}, 75%, 42%)`,
           explicit: false,
-          playCount: viewCount,
+          playCount: item.viewCount || 1000000,
         };
-
-        rawTracks.push(track);
       });
 
       const tracks = sinVersionesRepetidas(rawTracks);
-
-      const responseObj = {
-        tracks,
-        albums: Array.from(albumMap.values()),
-        artists: Array.from(artistMap.values()),
-      };
-
+      const responseObj = { tracks, albums: [], artists: [] };
       searchResultCache.set(cleanQuery, responseObj);
       return res.json(responseObj);
-    } catch (e) {
-      console.error('Search parsing error:', e);
-      return res.status(500).json({ error: 'Parsing error' });
+    } catch (fallbackErr) {
+      console.error('Dual layer fallback error:', fallbackErr);
+      return res.status(500).json({ error: 'Search failed' });
     }
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`🎵 Glassify Range Seeking Enabled Audio Server active on port ${PORT}`);
+  console.log(`🎵 Glassify Dual-Layer Audio Server active on port ${PORT}`);
 });
