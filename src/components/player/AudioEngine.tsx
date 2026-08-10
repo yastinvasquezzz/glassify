@@ -111,7 +111,6 @@ export const AudioEngine: React.FC = () => {
   return (
     <audio
       ref={audioRef}
-      crossOrigin="anonymous"
       onTimeUpdate={handleTimeUpdate}
       onLoadedMetadata={handleLoadedMetadata}
       onEnded={handleEnded}
