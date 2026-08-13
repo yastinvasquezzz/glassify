@@ -21,48 +21,26 @@ function filterUniqueTracks(tracks: Track[]): Track[] {
 /**
  * Extracts the 100% COMPLETE FULL SONG audio stream URL directly in the browser
  */
-export const getFullAudioStreamUrl = async (track: Track): Promise<string> => {
+export const getFullAudioStreamUrl = async (track: Track, forceRefresh = false): Promise<string> => {
   if (!track) return '';
 
-  if (streamCache.has(track.id)) {
+  if (!forceRefresh && streamCache.has(track.id)) {
     return streamCache.get(track.id)!;
   }
 
   const cleanVideoId = track.videoId || (track.id ? track.id.replace(/^(yt-|track-)/, '') : '');
+  const isVideoId = /^[a-zA-Z0-9_-]{11}$/.test(cleanVideoId);
 
-  // 1. Try Piped & Invidious Public APIs for 100% Full Song Streams
-  const streamEndpoints = [
-    `https://pipedapi.kavin.rocks/streams/${cleanVideoId}`,
-    `https://api.piped.privacydev.net/streams/${cleanVideoId}`,
-    `https://inv.tux.pizza/api/v1/videos/${cleanVideoId}`,
-    `https://vid.puffyan.us/api/v1/videos/${cleanVideoId}`,
-  ];
+  const serverPortUrl = 'http://localhost:3001';
+  const queryParam = encodeURIComponent(`${track.artist} - ${track.title}`);
+  const durationParam = track.duration || 0;
 
-  for (const endpoint of streamEndpoints) {
-    try {
-      const res = await fetch(endpoint);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.audioStreams && Array.isArray(data.audioStreams) && data.audioStreams.length > 0) {
-          const streamUrl = data.audioStreams[0].url;
-          if (streamUrl) {
-            streamCache.set(track.id, streamUrl);
-            return streamUrl;
-          }
-        }
-        if (data.adaptiveFormats && Array.isArray(data.adaptiveFormats)) {
-          const audioFormat = data.adaptiveFormats.find((f: any) => f.type && f.type.includes('audio'));
-          if (audioFormat && audioFormat.url) {
-            streamCache.set(track.id, audioFormat.url);
-            return audioFormat.url;
-          }
-        }
-      }
-    } catch (e) {}
-  }
+  const localProxyUrl = isVideoId
+    ? `${serverPortUrl}/api/stream-audio?id=${cleanVideoId}&q=${queryParam}&duration=${durationParam}`
+    : `${serverPortUrl}/api/stream-audio?id=${encodeURIComponent(track.title)}&q=${queryParam}&duration=${durationParam}`;
 
-  // 2. Fallback to track.audioUrl
-  return track.audioUrl || '';
+  streamCache.set(track.id, localProxyUrl);
+  return localProxyUrl;
 };
 
 /**
@@ -86,50 +64,26 @@ export const searchTracksFromApi = async (queryTerm: string): Promise<{
 
   let tracks: Track[] = [];
 
-  // Query Piped / Invidious Search for Video IDs & Full Songs
-  const searchEndpoints = [
-    `https://pipedapi.kavin.rocks/search?q=${encodeURIComponent(queryTerm.trim() + ' official audio')}&filter=music_songs`,
-    `https://api.piped.privacydev.net/search?q=${encodeURIComponent(queryTerm.trim() + ' official audio')}&filter=music_songs`,
-    `https://inv.tux.pizza/api/v1/search?q=${encodeURIComponent(queryTerm.trim() + ' official audio')}&type=video`,
-  ];
+  // 1. Query Local Glassify Backend Express Server (/api/search)
+  try {
+    const localSearchUrl = `http://localhost:3001/api/search?q=${encodeURIComponent(queryTerm.trim())}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-  for (const endpoint of searchEndpoints) {
-    try {
-      const res = await fetch(endpoint);
-      if (res.ok) {
-        const data = await res.json();
-        const items = Array.isArray(data) ? data : (data.items || []);
-        if (items.length > 0) {
-          tracks = items.slice(0, 20).map((item: any) => {
-            const videoId = item.videoId || (item.url ? item.url.replace('/watch?v=', '') : '');
-            const rawTitle = item.title || item.name || 'Canción';
-            const artist = item.uploaderName || item.author || 'Artista';
-            const coverUrl = item.thumbnail || (item.videoThumbnails && item.videoThumbnails[0] ? item.videoThumbnails[0].url : `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`);
+    const res = await fetch(localSearchUrl, { signal: controller.signal });
+    clearTimeout(timeoutId);
 
-            return {
-              id: `yt-${videoId}`,
-              videoId,
-              title: rawTitle.replace(/\s*[\(\[][^\)\]]*[\)\]]/g, '').trim(),
-              artist: artist.replace(/\s*-\s*Topic$/i, '').trim(),
-              artistId: `artist-${encodeURIComponent(artist)}`,
-              album: `Álbum - ${rawTitle}`,
-              albumId: `album-${artist}`,
-              coverUrl,
-              audioUrl: `https://www.youtube.com/watch?v=${videoId}`,
-              duration: item.duration || item.lengthSeconds || 210,
-              genre: 'Música Hi-Fi',
-              dominantColor: `hsl(${Math.abs(videoId.split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0)) % 360}, 75%, 42%)`,
-              explicit: false,
-              playCount: item.views || 1000000,
-            };
-          });
-          break;
-        }
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data.tracks) && data.tracks.length > 0) {
+        tracks = data.tracks;
       }
-    } catch (e) {}
+    }
+  } catch (e) {
+    // Local server offline or timed out, proceed to fallback
   }
 
-  // Fallback to iTunes API
+  // 2. High-Speed Fallback: iTunes API (Fast, global, reliable)
   if (tracks.length === 0) {
     try {
       const iTunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(queryTerm.trim())}&entity=song&limit=25`;
@@ -152,7 +106,7 @@ export const searchTracksFromApi = async (queryTerm: string): Promise<{
               album: item.collectionName || 'Álbum',
               albumId: `album-${item.collectionId}`,
               coverUrl,
-              audioUrl: item.previewUrl || '',
+              audioUrl: `http://localhost:3001/api/stream-audio?id=${encodeURIComponent(title)}&q=${encodeURIComponent(artist + ' - ' + title)}&duration=${duration}`,
               duration,
               genre: item.primaryGenreName || 'Música Hi-Fi',
               dominantColor: `hsl(${Math.abs((title + artist).split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0)) % 360}, 75%, 42%)`,
@@ -186,43 +140,36 @@ export const fetchTopTrendingTracks = async (): Promise<{
   albums: Album[];
 }> => {
   try {
-    const [brunoRes, badBunnyRes, weekndRes, duaRes, taylorRes, drakeRes] = await Promise.all([
+    const res = await fetch('http://localhost:3001/api/trending');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data.trending) && data.trending.length > 0) {
+        return {
+          trending: data.trending || [],
+          lofi: data.lofi || [],
+          synthwave: data.synthwave || [],
+          pop: data.pop || [],
+          albums: data.albums || [],
+        };
+      }
+    }
+  } catch (err) {}
+
+  try {
+    const [brunoRes, badBunnyRes, weekndRes, duaRes] = await Promise.all([
       searchTracksFromApi('Bruno Mars'),
       searchTracksFromApi('Bad Bunny'),
       searchTracksFromApi('The Weeknd'),
       searchTracksFromApi('Dua Lipa'),
-      searchTracksFromApi('Taylor Swift'),
-      searchTracksFromApi('Drake'),
     ]);
-
-    const diverseTrending: Track[] = [];
-    const maxLength = Math.max(
-      brunoRes.tracks.length,
-      badBunnyRes.tracks.length,
-      weekndRes.tracks.length,
-      duaRes.tracks.length,
-      taylorRes.tracks.length,
-      drakeRes.tracks.length
-    );
-
-    for (let i = 0; i < maxLength; i++) {
-      if (brunoRes.tracks[i]) diverseTrending.push(brunoRes.tracks[i]);
-      if (badBunnyRes.tracks[i]) diverseTrending.push(badBunnyRes.tracks[i]);
-      if (weekndRes.tracks[i]) diverseTrending.push(weekndRes.tracks[i]);
-      if (duaRes.tracks[i]) diverseTrending.push(duaRes.tracks[i]);
-      if (taylorRes.tracks[i]) diverseTrending.push(taylorRes.tracks[i]);
-      if (drakeRes.tracks[i]) diverseTrending.push(drakeRes.tracks[i]);
-    }
-
     return {
-      trending: diverseTrending.slice(0, 15),
-      lofi: badBunnyRes.tracks.slice(0, 8),
-      synthwave: weekndRes.tracks.slice(0, 8),
-      pop: duaRes.tracks.slice(0, 8),
-      albums: [...brunoRes.albums, ...badBunnyRes.albums, ...weekndRes.albums],
+      trending: [...brunoRes.tracks, ...badBunnyRes.tracks],
+      lofi: badBunnyRes.tracks,
+      synthwave: weekndRes.tracks,
+      pop: duaRes.tracks,
+      albums: [],
     };
-  } catch (err) {
-    console.error('Error fetching trending tracks:', err);
+  } catch (e) {
     return { trending: [], lofi: [], synthwave: [], pop: [], albums: [] };
   }
 };

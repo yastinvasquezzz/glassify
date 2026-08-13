@@ -111,6 +111,30 @@ export const AudioEngine: React.FC = () => {
     }
   }, [currentTrack]);
 
+  const retryCountRef = useRef<number>(0);
+
+  const handleAudioError = async () => {
+    if (!currentTrack || !audioRef.current) return;
+
+    if (retryCountRef.current < 3) {
+      retryCountRef.current += 1;
+      console.warn(`Audio playback notice. Refetching audio stream for "${currentTrack.title}" (Attempt ${retryCountRef.current})...`);
+
+      const freshUrl = await getFullAudioStreamUrl(currentTrack, true);
+      if (audioRef.current && freshUrl) {
+        audioRef.current.src = freshUrl;
+        audioRef.current.load();
+        if (isPlaying) {
+          audioRef.current.play().catch(() => {});
+        }
+      }
+    } else {
+      console.warn(`Audio stream refetch paused for "${currentTrack.title}". User can click play to retry.`);
+      retryCountRef.current = 0;
+      setIsPlaying(false);
+    }
+  };
+
   const handleTimeUpdate = () => {
     if (audioRef.current) {
       setCurrentTime(audioRef.current.currentTime || 0);
@@ -119,11 +143,13 @@ export const AudioEngine: React.FC = () => {
 
   const handleLoadedMetadata = () => {
     if (audioRef.current) {
+      retryCountRef.current = 0;
       setDuration(audioRef.current.duration || currentTrack?.duration || 0);
     }
   };
 
   const handleEnded = () => {
+    retryCountRef.current = 0;
     nextTrack();
   };
 
@@ -133,6 +159,7 @@ export const AudioEngine: React.FC = () => {
       onTimeUpdate={handleTimeUpdate}
       onLoadedMetadata={handleLoadedMetadata}
       onEnded={handleEnded}
+      onError={handleAudioError}
       preload="auto"
     />
   );
