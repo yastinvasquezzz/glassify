@@ -97,7 +97,16 @@ export const AudioEngine: React.FC = () => {
             } else if (event.data === 1) {
               setIsPlaying(true);
             } else if (event.data === 2) {
-              setIsPlaying(false);
+              // Ignore automatic background pause triggered by browser tab hiding
+              if (!document.hidden) {
+                setIsPlaying(false);
+              } else {
+                if (usePlayerStore.getState().isPlaying && playerRef.current) {
+                  try {
+                    playerRef.current.playVideo();
+                  } catch (e) {}
+                }
+              }
             }
           },
         },
@@ -112,6 +121,42 @@ export const AudioEngine: React.FC = () => {
       };
     }
   }, []);
+
+  // Persistent Tab Visibility Listener (Keep playing audio in background)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden && isPlaying && playerRef.current) {
+        try {
+          playerRef.current.playVideo();
+        } catch (e) {}
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleVisibilityChange);
+    };
+  }, [isPlaying]);
+
+  // Silent Background Audio Keep-Alive Element
+  const silentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    if (!silentAudioRef.current) {
+      const audio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
+      audio.loop = true;
+      silentAudioRef.current = audio;
+    }
+
+    if (isPlaying) {
+      silentAudioRef.current.play().catch(() => {});
+    } else {
+      silentAudioRef.current.pause();
+    }
+  }, [isPlaying]);
 
   // Handle Track Loading
   useEffect(() => {
@@ -135,7 +180,6 @@ export const AudioEngine: React.FC = () => {
     if (isVideoId) {
       loadAndPlay(cleanId);
     } else {
-      // Immediately pause previous track so old audio never continues playing
       try {
         playerRef.current.pauseVideo();
       } catch (e) {}
@@ -206,7 +250,7 @@ export const AudioEngine: React.FC = () => {
     } catch (e) {}
   }, [currentTime, isPlayerReady]);
 
-  // Sync MediaSession Metadata
+  // Sync MediaSession Metadata & Playback State
   useEffect(() => {
     if ('mediaSession' in navigator && currentTrack) {
       navigator.mediaSession.metadata = new MediaMetadata({
@@ -216,12 +260,14 @@ export const AudioEngine: React.FC = () => {
         artwork: [{ src: currentTrack.coverUrl, sizes: '512x512', type: 'image/jpeg' }],
       });
 
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+
       navigator.mediaSession.setActionHandler('play', () => setIsPlaying(true));
       navigator.mediaSession.setActionHandler('pause', () => setIsPlaying(false));
       navigator.mediaSession.setActionHandler('previoustrack', () => usePlayerStore.getState().previousTrack());
       navigator.mediaSession.setActionHandler('nexttrack', () => usePlayerStore.getState().nextTrack());
     }
-  }, [currentTrack]);
+  }, [currentTrack, isPlaying]);
 
   return (
     <div className="fixed top-0 left-0 w-1 h-1 opacity-0 pointer-events-none overflow-hidden z-[-999]">
