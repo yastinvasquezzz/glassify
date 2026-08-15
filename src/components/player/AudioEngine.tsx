@@ -8,6 +8,44 @@ declare global {
   }
 }
 
+const PUBLIC_INVIDIOUS_INSTANCES = [
+  'https://inv.tux.pizza',
+  'https://vid.puffyan.us',
+  'https://invidious.drgns.space',
+  'https://invidious.nerdvpn.de',
+  'https://api.piped.video',
+];
+
+async function resolveYouTubeVideoId(query: string): Promise<string | null> {
+  const clean = query.trim();
+  for (const instance of PUBLIC_INVIDIOUS_INSTANCES) {
+    try {
+      const isPiped = instance.includes('piped');
+      const url = isPiped
+        ? `${instance}/search?q=${encodeURIComponent(clean)}&filter=videos`
+        : `${instance}/api/v1/search?q=${encodeURIComponent(clean)}&type=video`;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (isPiped && Array.isArray(data.items) && data.items.length > 0) {
+          const rawUrl = data.items[0].url || '';
+          const vId = rawUrl.replace('/watch?v=', '');
+          if (vId && /^[a-zA-Z0-9_-]{11}$/.test(vId)) return vId;
+        } else if (Array.isArray(data) && data.length > 0 && data[0].videoId) {
+          const vId = data[0].videoId;
+          if (vId && /^[a-zA-Z0-9_-]{11}$/.test(vId)) return vId;
+        }
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
 export const AudioEngine: React.FC = () => {
   const playerRef = useRef<any>(null);
   const playerContainerRef = useRef<HTMLDivElement | null>(null);
@@ -81,11 +119,12 @@ export const AudioEngine: React.FC = () => {
   useEffect(() => {
     if (!isPlayerReady || !currentTrack || !playerRef.current) return;
 
+    let isMounted = true;
     const cleanId = currentTrack.videoId || currentTrack.id.replace(/^(yt-|track-)/, '');
     const isVideoId = /^[a-zA-Z0-9_-]{11}$/.test(cleanId);
 
-    const playVideoWithId = (vId: string) => {
-      if (currentVideoIdRef.current === vId) return;
+    const loadAndPlay = (vId: string) => {
+      if (!isMounted || !playerRef.current) return;
       currentVideoIdRef.current = vId;
       try {
         playerRef.current.loadVideoById({ videoId: vId });
@@ -96,18 +135,23 @@ export const AudioEngine: React.FC = () => {
     };
 
     if (isVideoId) {
-      playVideoWithId(cleanId);
+      loadAndPlay(cleanId);
     } else {
-      const searchUrl = `https://inv.tux.pizza/api/v1/search?q=${encodeURIComponent(currentTrack.artist + ' ' + currentTrack.title)}&type=video`;
-      fetch(searchUrl)
-        .then((res) => res.json())
-        .then((data) => {
-          if (Array.isArray(data) && data.length > 0 && data[0].videoId) {
-            playVideoWithId(data[0].videoId);
-          }
-        })
-        .catch(() => {});
+      // Immediately pause previous track so old audio never continues playing
+      try {
+        playerRef.current.pauseVideo();
+      } catch (e) {}
+
+      resolveYouTubeVideoId(`${currentTrack.artist} ${currentTrack.title}`).then((vId) => {
+        if (vId && isMounted) {
+          loadAndPlay(vId);
+        }
+      });
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, [currentTrack?.id, isPlayerReady]);
 
   // Handle Play/Pause
