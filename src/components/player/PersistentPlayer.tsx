@@ -109,7 +109,7 @@ export const PersistentPlayer: React.FC = () => {
                 </div>
               </div>
 
-              {/* Action Buttons: SkipBack + Play/Pause + SkipForward + Heart */}
+              {/* Action Buttons: SkipBack + Play/Pause + SkipForward + Heart + Lyrics */}
               <div className="flex items-center gap-1 flex-shrink-0">
                 <button
                   onClick={previousTrack}
@@ -147,6 +147,16 @@ export const PersistentPlayer: React.FC = () => {
                   title={isLiked ? 'Quitar Me gusta' : 'Me gusta'}
                 >
                   <Heart className={`w-4 h-4 ${isLiked ? 'fill-pink-400' : ''}`} />
+                </button>
+
+                <button
+                  onClick={toggleLyricsDrawer}
+                  className={`p-1.5 rounded-full transition-colors ${
+                    isLyricsOpen ? 'text-[#1db954] bg-[#1db954]/20 border border-[#1db954]/40' : 'text-neutral-400 hover:text-white'
+                  }`}
+                  title="Letras Sincronizadas"
+                >
+                  <Mic2 className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -292,8 +302,8 @@ export const PersistentPlayer: React.FC = () => {
             <button
               onClick={toggleLyricsDrawer}
               title="Letras Sincronizadas"
-              className={`p-2 rounded-full transition-colors ${
-                isLyricsOpen ? 'text-[#1db954] bg-[#1db954]/20 shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'text-neutral-400 hover:text-white hover:bg-white/10'
+              className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
+                isLyricsOpen ? 'text-[#1db954] bg-[#1db954]/20 border border-[#1db954]/40 shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'text-neutral-400 hover:text-white hover:bg-white/10'
               }`}
             >
               <Mic2 className="w-4 h-4" />
@@ -302,8 +312,8 @@ export const PersistentPlayer: React.FC = () => {
             <button
               onClick={toggleQueueDrawer}
               title="Cola de reproducción"
-              className={`p-2 rounded-full transition-colors ${
-                isQueueOpen ? 'text-[#1db954] bg-[#1db954]/20 shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'text-neutral-400 hover:text-white hover:bg-white/10'
+              className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
+                isQueueOpen ? 'text-[#1db954] bg-[#1db954]/20 border border-[#1db954]/40 shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'text-neutral-400 hover:text-white hover:bg-white/10'
               }`}
             >
               <ListMusic className="w-4 h-4" />
@@ -312,7 +322,7 @@ export const PersistentPlayer: React.FC = () => {
             <button
               onClick={toggleEqualizerModal}
               title="Ecualizador"
-              className="p-2 rounded-full text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
+              className="w-8 h-8 rounded-full flex items-center justify-center text-neutral-400 hover:text-white hover:bg-white/10 transition-all"
             >
               <Sliders className="w-4 h-4" />
             </button>

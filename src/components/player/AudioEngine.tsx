@@ -74,8 +74,8 @@ export const AudioEngine: React.FC = () => {
     const initPlayer = () => {
       if (playerRef.current || !playerContainerRef.current) return;
       playerRef.current = new window.YT.Player(playerContainerRef.current, {
-        height: '1',
-        width: '1',
+        height: '64',
+        width: '64',
         playerVars: {
           autoplay: 1,
           controls: 0,
@@ -99,15 +99,15 @@ export const AudioEngine: React.FC = () => {
             } else if (event.data === 1) {
               setIsPlaying(true);
             } else if (event.data === 2) {
-              // Ignore automatic background pause triggered by browser tab hiding
-              if (!document.hidden) {
+              // Ignore automatic background pause triggered by browser tab hiding or WebKit throttling
+              if (!document.hidden && !usePlayerStore.getState().isPlaying) {
                 setIsPlaying(false);
-              } else {
-                if (usePlayerStore.getState().isPlaying && playerRef.current) {
+              } else if (usePlayerStore.getState().isPlaying && playerRef.current) {
+                setTimeout(() => {
                   try {
-                    playerRef.current.playVideo();
+                    playerRef.current?.playVideo();
                   } catch (e) {}
-                }
+                }, 100);
               }
             }
           },
@@ -258,21 +258,35 @@ export const AudioEngine: React.FC = () => {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: currentTrack.title,
         artist: currentTrack.artist,
-        album: currentTrack.album,
+        album: currentTrack.album || 'Glassify Hi-Fi',
         artwork: [{ src: currentTrack.coverUrl, sizes: '512x512', type: 'image/jpeg' }],
       });
 
       navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
 
-      navigator.mediaSession.setActionHandler('play', () => setIsPlaying(true));
-      navigator.mediaSession.setActionHandler('pause', () => setIsPlaying(false));
+      navigator.mediaSession.setActionHandler('play', () => {
+        setIsPlaying(true);
+        if (playerRef.current) {
+          try {
+            playerRef.current.playVideo();
+          } catch (e) {}
+        }
+      });
+      navigator.mediaSession.setActionHandler('pause', () => {
+        setIsPlaying(false);
+        if (playerRef.current) {
+          try {
+            playerRef.current.pauseVideo();
+          } catch (e) {}
+        }
+      });
       navigator.mediaSession.setActionHandler('previoustrack', () => usePlayerStore.getState().previousTrack());
       navigator.mediaSession.setActionHandler('nexttrack', () => usePlayerStore.getState().nextTrack());
     }
   }, [currentTrack, isPlaying]);
 
   return (
-    <div className="fixed top-0 left-0 w-1 h-1 opacity-0 pointer-events-none overflow-hidden z-[-999]">
+    <div className="fixed top-0 -left-[9999px] w-16 h-16 pointer-events-none overflow-hidden z-[-999]">
       <div ref={playerContainerRef} id="youtube-audio-player" />
     </div>
   );

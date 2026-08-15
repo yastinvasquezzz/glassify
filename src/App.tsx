@@ -177,11 +177,16 @@ export const App: React.FC = () => {
           <PersistentPlayer />
         </div>
 
-        {/* Right Lyrics Column Panel (Dedicated 3-column layout) */}
+        {/* Right Lyrics Column Panel (Desktop 3-column layout & Mobile Drawer Overlay) */}
         {isLyricsOpen && (
-          <div className="w-80 xl:w-96 flex-shrink-0 h-full hidden md:block animate-slideLeft">
-            <LyricsDrawer />
-          </div>
+          <>
+            <div className="w-80 xl:w-96 flex-shrink-0 h-full hidden md:block animate-slideLeft">
+              <LyricsDrawer />
+            </div>
+            <div className="md:hidden fixed inset-0 z-50 p-3 bg-slate-950/95 backdrop-blur-2xl animate-fadeIn flex flex-col">
+              <LyricsDrawer />
+            </div>
+          </>
         )}
       </div>
 
