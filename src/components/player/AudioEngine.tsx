@@ -1,10 +1,18 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { usePlayerStore } from '../../store/usePlayerStore';
-import { getFullAudioStreamUrl } from '../../services/musicApi';
+
+declare global {
+  interface Window {
+    YT: any;
+    onYouTubeIframeAPIReady: any;
+  }
+}
 
 export const AudioEngine: React.FC = () => {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const loadedTrackIdRef = useRef<string | null>(null);
+  const playerRef = useRef<any>(null);
+  const playerContainerRef = useRef<HTMLDivElement | null>(null);
+  const [isPlayerReady, setIsPlayerReady] = useState(false);
+  const currentVideoIdRef = useRef<string | null>(null);
 
   const {
     currentTrack,
@@ -18,83 +26,145 @@ export const AudioEngine: React.FC = () => {
     setIsPlaying,
   } = usePlayerStore();
 
-  // Extract full audio stream and play whenever currentTrack changes
+  // Load YouTube IFrame API
   useEffect(() => {
-    if (!audioRef.current || !currentTrack) return;
+    if (!window.YT) {
+      const tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      const firstScriptTag = document.getElementsByTagName('script')[0];
+      firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
+    }
 
-    let isMounted = true;
-
-    const loadAndPlayFullTrack = async () => {
-      if (loadedTrackIdRef.current === currentTrack.id) return;
-      loadedTrackIdRef.current = currentTrack.id;
-
-      // Extract 100% FULL SONG audio stream
-      const streamUrl = await getFullAudioStreamUrl(currentTrack);
-
-      if (!isMounted || !audioRef.current) return;
-
-      if (streamUrl) {
-        audioRef.current.src = streamUrl;
-        audioRef.current.load();
-      }
-
-      if (isPlaying) {
-        const playPromise = audioRef.current.play();
-        if (playPromise !== undefined) {
-          playPromise.catch((err) => {
-            console.warn('Full track play execution notice:', err);
-          });
-        }
-      }
+    const initPlayer = () => {
+      if (playerRef.current || !playerContainerRef.current) return;
+      playerRef.current = new window.YT.Player(playerContainerRef.current, {
+        height: '1',
+        width: '1',
+        playerVars: {
+          autoplay: 1,
+          controls: 0,
+          disablekb: 1,
+          fs: 0,
+          iv_load_policy: 3,
+          modestbranding: 1,
+          playsinline: 1,
+          rel: 0,
+        },
+        events: {
+          onReady: () => {
+            setIsPlayerReady(true);
+          },
+          onStateChange: (event: any) => {
+            // YT.PlayerState.ENDED === 0
+            if (event.data === 0) {
+              nextTrack();
+            } else if (event.data === 1) {
+              setIsPlaying(true);
+            } else if (event.data === 2) {
+              setIsPlaying(false);
+            }
+          },
+        },
+      });
     };
 
-    loadAndPlayFullTrack();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [currentTrack?.id]);
-
-  // Handle Play/Pause Toggle
-  useEffect(() => {
-    if (!audioRef.current || !currentTrack) return;
-
-    if (isPlaying) {
-      if (!audioRef.current.src) {
-        getFullAudioStreamUrl(currentTrack).then((url) => {
-          if (audioRef.current && url) {
-            audioRef.current.src = url;
-            audioRef.current.load();
-            audioRef.current.play().catch(() => {});
-          }
-        });
-      } else {
-        const playPromise = audioRef.current.play();
-        if (playPromise !== undefined) {
-          playPromise.catch(() => {});
-        }
-      }
+    if (window.YT && window.YT.Player) {
+      initPlayer();
     } else {
-      audioRef.current.pause();
+      window.onYouTubeIframeAPIReady = () => {
+        initPlayer();
+      };
     }
-  }, [isPlaying]);
+  }, []);
 
-  // Handle Seek Position Changes
+  // Handle Track Loading
   useEffect(() => {
-    if (!audioRef.current) return;
-    const timeDifference = Math.abs(audioRef.current.currentTime - currentTime);
-    if (timeDifference > 1.5) {
-      audioRef.current.currentTime = currentTime;
+    if (!isPlayerReady || !currentTrack || !playerRef.current) return;
+
+    const cleanId = currentTrack.videoId || currentTrack.id.replace(/^(yt-|track-)/, '');
+    const isVideoId = /^[a-zA-Z0-9_-]{11}$/.test(cleanId);
+
+    const playVideoWithId = (vId: string) => {
+      if (currentVideoIdRef.current === vId) return;
+      currentVideoIdRef.current = vId;
+      try {
+        playerRef.current.loadVideoById({ videoId: vId });
+        if (isPlaying) {
+          playerRef.current.playVideo();
+        }
+      } catch (e) {}
+    };
+
+    if (isVideoId) {
+      playVideoWithId(cleanId);
+    } else {
+      const searchUrl = `https://inv.tux.pizza/api/v1/search?q=${encodeURIComponent(currentTrack.artist + ' ' + currentTrack.title)}&type=video`;
+      fetch(searchUrl)
+        .then((res) => res.json())
+        .then((data) => {
+          if (Array.isArray(data) && data.length > 0 && data[0].videoId) {
+            playVideoWithId(data[0].videoId);
+          }
+        })
+        .catch(() => {});
     }
-  }, [currentTime]);
+  }, [currentTrack?.id, isPlayerReady]);
 
-  // Handle Volume & Mute Changes
+  // Handle Play/Pause
   useEffect(() => {
-    if (!audioRef.current) return;
-    audioRef.current.volume = isMuted ? 0 : volume;
-  }, [volume, isMuted]);
+    if (!isPlayerReady || !playerRef.current) return;
+    try {
+      if (isPlaying) {
+        playerRef.current.playVideo();
+      } else {
+        playerRef.current.pauseVideo();
+      }
+    } catch (e) {}
+  }, [isPlaying, isPlayerReady]);
 
-  // Sync MediaSession Metadata for Lock Screen & Control Center
+  // Handle Volume & Mute
+  useEffect(() => {
+    if (!isPlayerReady || !playerRef.current) return;
+    try {
+      if (isMuted) {
+        playerRef.current.mute();
+      } else {
+        playerRef.current.unMute();
+        playerRef.current.setVolume(Math.round(volume * 100));
+      }
+    } catch (e) {}
+  }, [volume, isMuted, isPlayerReady]);
+
+  // Sync Current Time & Duration via interval
+  useEffect(() => {
+    if (!isPlayerReady || !playerRef.current) return;
+
+    const interval = setInterval(() => {
+      try {
+        if (playerRef.current.getCurrentTime) {
+          const cur = playerRef.current.getCurrentTime() || 0;
+          const dur = playerRef.current.getDuration() || 0;
+          if (cur > 0) setCurrentTime(cur);
+          if (dur > 0) setDuration(dur);
+        }
+      } catch (e) {}
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [isPlayerReady]);
+
+  // Handle Seek Position
+  useEffect(() => {
+    if (!isPlayerReady || !playerRef.current) return;
+    try {
+      const curTime = playerRef.current.getCurrentTime() || 0;
+      if (Math.abs(curTime - currentTime) > 2) {
+        playerRef.current.seekTo(currentTime, true);
+      }
+    } catch (e) {}
+  }, [currentTime, isPlayerReady]);
+
+  // Sync MediaSession Metadata
   useEffect(() => {
     if ('mediaSession' in navigator && currentTrack) {
       navigator.mediaSession.metadata = new MediaMetadata({
@@ -111,56 +181,9 @@ export const AudioEngine: React.FC = () => {
     }
   }, [currentTrack]);
 
-  const retryCountRef = useRef<number>(0);
-
-  const handleAudioError = async () => {
-    if (!currentTrack || !audioRef.current) return;
-
-    if (retryCountRef.current < 3) {
-      retryCountRef.current += 1;
-      console.warn(`Audio playback notice. Refetching audio stream for "${currentTrack.title}" (Attempt ${retryCountRef.current})...`);
-
-      const freshUrl = await getFullAudioStreamUrl(currentTrack, true);
-      if (audioRef.current && freshUrl) {
-        audioRef.current.src = freshUrl;
-        audioRef.current.load();
-        if (isPlaying) {
-          audioRef.current.play().catch(() => {});
-        }
-      }
-    } else {
-      console.warn(`Audio stream refetch paused for "${currentTrack.title}". User can click play to retry.`);
-      retryCountRef.current = 0;
-      setIsPlaying(false);
-    }
-  };
-
-  const handleTimeUpdate = () => {
-    if (audioRef.current) {
-      setCurrentTime(audioRef.current.currentTime || 0);
-    }
-  };
-
-  const handleLoadedMetadata = () => {
-    if (audioRef.current) {
-      retryCountRef.current = 0;
-      setDuration(audioRef.current.duration || currentTrack?.duration || 0);
-    }
-  };
-
-  const handleEnded = () => {
-    retryCountRef.current = 0;
-    nextTrack();
-  };
-
   return (
-    <audio
-      ref={audioRef}
-      onTimeUpdate={handleTimeUpdate}
-      onLoadedMetadata={handleLoadedMetadata}
-      onEnded={handleEnded}
-      onError={handleAudioError}
-      preload="auto"
-    />
+    <div className="fixed top-0 left-0 w-1 h-1 opacity-0 pointer-events-none overflow-hidden z-[-999]">
+      <div ref={playerContainerRef} id="youtube-audio-player" />
+    </div>
   );
 };

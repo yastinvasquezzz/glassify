@@ -64,60 +64,39 @@ export const searchTracksFromApi = async (queryTerm: string): Promise<{
 
   let tracks: Track[] = [];
 
-  // 1. Query Local Glassify Backend Express Server (/api/search)
+  // 1. High-Speed Fallback / Direct iTunes API (Fast, global, 100% browser native)
   try {
-    const localSearchUrl = `http://localhost:3001/api/search?q=${encodeURIComponent(queryTerm.trim())}`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-    const res = await fetch(localSearchUrl, { signal: controller.signal });
-    clearTimeout(timeoutId);
-
+    const iTunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(queryTerm.trim())}&entity=song&limit=30`;
+    const res = await fetch(iTunesUrl);
     if (res.ok) {
       const data = await res.json();
-      if (data && Array.isArray(data.tracks) && data.tracks.length > 0) {
-        tracks = data.tracks;
+      if (data.results && data.results.length > 0) {
+        tracks = data.results.map((item: any) => {
+          const title = item.trackName || 'Canción';
+          const artist = item.artistName || 'Artista';
+          const coverUrl = (item.artworkUrl100 || '').replace('100x100bb', '600x600bb');
+          const duration = Math.round((item.trackTimeMillis || 210000) / 1000);
+
+          return {
+            id: `track-${item.trackId || item.collectionId}`,
+            videoId: `${artist} - ${title}`,
+            title,
+            artist,
+            artistId: `artist-${encodeURIComponent(artist)}`,
+            album: item.collectionName || 'Álbum',
+            albumId: `album-${item.collectionId}`,
+            coverUrl,
+            audioUrl: '',
+            duration,
+            genre: item.primaryGenreName || 'Música Hi-Fi',
+            dominantColor: `hsl(${Math.abs((title + artist).split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0)) % 360}, 75%, 42%)`,
+            explicit: item.trackExplicitness === 'explicit',
+            playCount: 5000000,
+          };
+        });
       }
     }
-  } catch (e) {
-    // Local server offline or timed out, proceed to fallback
-  }
-
-  // 2. High-Speed Fallback: iTunes API (Fast, global, reliable)
-  if (tracks.length === 0) {
-    try {
-      const iTunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(queryTerm.trim())}&entity=song&limit=25`;
-      const res = await fetch(iTunesUrl);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.results && data.results.length > 0) {
-          tracks = data.results.map((item: any) => {
-            const title = item.trackName || 'Canción';
-            const artist = item.artistName || 'Artista';
-            const coverUrl = (item.artworkUrl100 || '').replace('100x100bb', '600x600bb');
-            const duration = Math.round((item.trackTimeMillis || 210000) / 1000);
-
-            return {
-              id: `track-${item.trackId || item.collectionId}`,
-              videoId: `${artist} - ${title}`,
-              title,
-              artist,
-              artistId: `artist-${encodeURIComponent(artist)}`,
-              album: item.collectionName || 'Álbum',
-              albumId: `album-${item.collectionId}`,
-              coverUrl,
-              audioUrl: `http://localhost:3001/api/stream-audio?id=${encodeURIComponent(title)}&q=${encodeURIComponent(artist + ' - ' + title)}&duration=${duration}`,
-              duration,
-              genre: item.primaryGenreName || 'Música Hi-Fi',
-              dominantColor: `hsl(${Math.abs((title + artist).split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0)) % 360}, 75%, 42%)`,
-              explicit: item.trackExplicitness === 'explicit',
-              playCount: 5000000,
-            };
-          });
-        }
-      }
-    } catch (e) {}
-  }
+  } catch (e) {}
 
   const uniqueTracks = filterUniqueTracks(tracks);
   const result = { tracks: uniqueTracks, albums: [], artists: [] };
@@ -140,33 +119,33 @@ export const fetchTopTrendingTracks = async (): Promise<{
   albums: Album[];
 }> => {
   try {
-    const res = await fetch('http://localhost:3001/api/trending');
-    if (res.ok) {
-      const data = await res.json();
-      if (data && Array.isArray(data.trending) && data.trending.length > 0) {
-        return {
-          trending: data.trending || [],
-          lofi: data.lofi || [],
-          synthwave: data.synthwave || [],
-          pop: data.pop || [],
-          albums: data.albums || [],
-        };
-      }
-    }
-  } catch (err) {}
-
-  try {
     const [brunoRes, badBunnyRes, weekndRes, duaRes] = await Promise.all([
       searchTracksFromApi('Bruno Mars'),
       searchTracksFromApi('Bad Bunny'),
       searchTracksFromApi('The Weeknd'),
       searchTracksFromApi('Dua Lipa'),
     ]);
+
+    const diverseTrending: Track[] = [];
+    const maxLength = Math.max(
+      brunoRes.tracks.length,
+      badBunnyRes.tracks.length,
+      weekndRes.tracks.length,
+      duaRes.tracks.length
+    );
+
+    for (let i = 0; i < maxLength; i++) {
+      if (brunoRes.tracks[i]) diverseTrending.push(brunoRes.tracks[i]);
+      if (badBunnyRes.tracks[i]) diverseTrending.push(badBunnyRes.tracks[i]);
+      if (weekndRes.tracks[i]) diverseTrending.push(weekndRes.tracks[i]);
+      if (duaRes.tracks[i]) diverseTrending.push(duaRes.tracks[i]);
+    }
+
     return {
-      trending: [...brunoRes.tracks, ...badBunnyRes.tracks],
-      lofi: badBunnyRes.tracks,
-      synthwave: weekndRes.tracks,
-      pop: duaRes.tracks,
+      trending: diverseTrending.slice(0, 15),
+      lofi: badBunnyRes.tracks.slice(0, 8),
+      synthwave: weekndRes.tracks.slice(0, 8),
+      pop: duaRes.tracks.slice(0, 8),
       albums: [],
     };
   } catch (e) {
