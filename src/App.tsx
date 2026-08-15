@@ -69,22 +69,28 @@ export const App: React.FC = () => {
   }, [togglePlayPause, setCurrentTime, currentTime, nextTrack, previousTrack]);
 
   const renderMainView = () => {
-    switch (activeView) {
-      case 'home':
-        return <HomeView />;
-      case 'search':
-        return <SearchView />;
-      case 'library':
-        return <LibraryView />;
-      case 'artist':
-        return <ArtistView />;
-      case 'album':
-        return <AlbumView />;
-      case 'playlist':
-        return <PlaylistView />;
-      default:
-        return <HomeView />;
-    }
+    return (
+      <div key={activeView} className="animate-slide-up h-full w-full">
+        {(() => {
+          switch (activeView) {
+            case 'home':
+              return <HomeView />;
+            case 'search':
+              return <SearchView />;
+            case 'library':
+              return <LibraryView />;
+            case 'artist':
+              return <ArtistView />;
+            case 'album':
+              return <AlbumView />;
+            case 'playlist':
+              return <PlaylistView />;
+            default:
+              return <HomeView />;
+          }
+        })()}
+      </div>
+    );
   };
 
   const dynamicColor = currentTrack?.dominantColor || 'hsl(160, 84%, 39%)';

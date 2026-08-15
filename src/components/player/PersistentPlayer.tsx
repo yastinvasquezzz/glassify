@@ -89,13 +89,23 @@ export const PersistentPlayer: React.FC = () => {
                     isPlaying ? 'animate-spin-slow' : ''
                   }`}
                 />
-                <div className="overflow-hidden min-w-0 flex-1">
-                  <h4 className="text-xs font-bold text-white truncate leading-tight">
-                    {currentTrack.title}
-                  </h4>
-                  <p className="text-[10px] text-neutral-400 truncate mt-0.5 font-medium">
-                    {currentTrack.artist}
-                  </p>
+                <div className="overflow-hidden min-w-0 flex-1 flex items-center gap-2">
+                  <div className="overflow-hidden min-w-0 flex-1">
+                    <h4 className="text-xs font-bold text-white truncate leading-tight flex items-center gap-1.5">
+                      {currentTrack.title}
+                    </h4>
+                    <p className="text-[10px] text-neutral-400 truncate mt-0.5 font-medium">
+                      {currentTrack.artist}
+                    </p>
+                  </div>
+                  {isPlaying && (
+                    <div className="flex items-end gap-[2px] h-3.5 px-1 flex-shrink-0">
+                      <span className="w-0.5 bg-emerald-400 rounded-full h-full animate-bar-1" />
+                      <span className="w-0.5 bg-cyan-400 rounded-full h-full animate-bar-2" />
+                      <span className="w-0.5 bg-purple-400 rounded-full h-full animate-bar-3" />
+                      <span className="w-0.5 bg-emerald-400 rounded-full h-full animate-bar-4" />
+                    </div>
+                  )}
                 </div>
               </div>
 

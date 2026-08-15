@@ -39,6 +39,40 @@
   50% { opacity: 0.8; filter: drop-shadow(0 0 30px rgba(121, 40, 202, 0.7)); }
 }
 
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ambientPulse {
+  0%, 100% { transform: scale(1) rotate(0deg); opacity: 0.3; }
+  50% { transform: scale(1.18) rotate(8deg); opacity: 0.55; }
+}
+
+@keyframes barBounce {
+  0%, 100% { transform: scaleY(0.2); }
+  50% { transform: scaleY(1); }
+}
+
+.animate-slide-up {
+  animation: slideUpFade 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-ambient-pulse {
+  animation: ambientPulse 14s ease-in-out infinite;
+}
+
+.animate-bar-1 { animation: barBounce 0.8s ease-in-out infinite; }
+.animate-bar-2 { animation: barBounce 0.6s ease-in-out 0.15s infinite; }
+.animate-bar-3 { animation: barBounce 0.9s ease-in-out 0.3s infinite; }
+.animate-bar-4 { animation: barBounce 0.7s ease-in-out 0.45s infinite; }
+
 .animate-float-1 {
   animation: floatOrb1 16s ease-in-out infinite;
 }
