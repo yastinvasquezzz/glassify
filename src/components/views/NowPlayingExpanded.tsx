@@ -60,8 +60,9 @@ export const NowPlayingExpanded: React.FC = () => {
       <div className="relative z-10 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="inline-block w-2 h-2 rounded-full bg-brand-neon animate-pulse" />
-          <span className="text-xs uppercase tracking-widest text-emerald-400 font-bold">
-            REPRODUCCIÓN REVOLUCIONARIA GLASS
+          <span className="text-[10px] sm:text-xs uppercase tracking-widest text-emerald-400 font-bold">
+            <span className="hidden sm:inline">REPRODUCCIÓN REVOLUCIONARIA GLASS</span>
+            <span className="sm:hidden">GLASS PLAYER</span>
           </span>
         </div>
 

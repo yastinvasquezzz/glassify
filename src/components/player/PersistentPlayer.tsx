@@ -99,26 +99,44 @@ export const PersistentPlayer: React.FC = () => {
                 </div>
               </div>
 
-              {/* Action Buttons: Heart + Play/Pause */}
-              <div className="flex items-center gap-1.5 flex-shrink-0">
+              {/* Action Buttons: SkipBack + Play/Pause + SkipForward + Heart */}
+              <div className="flex items-center gap-1 flex-shrink-0">
                 <button
-                  onClick={() => toggleLikeTrackObject(currentTrack)}
-                  className={`p-1.5 rounded-full transition-colors ${
-                    isLiked ? 'text-pink-400 bg-pink-500/20' : 'text-neutral-400 hover:text-white'
-                  }`}
+                  onClick={previousTrack}
+                  className="p-1.5 text-neutral-300 hover:text-white rounded-full active:scale-90"
+                  title="Anterior"
                 >
-                  <Heart className={`w-4 h-4 ${isLiked ? 'fill-pink-400' : ''}`} />
+                  <SkipBack className="w-4 h-4 fill-white" />
                 </button>
 
                 <button
                   onClick={togglePlayPause}
                   className="w-9 h-9 rounded-full bg-[#1db954] active:bg-[#1ed760] text-black flex items-center justify-center shadow-[0_0_15px_rgba(29,185,84,0.8)] active:scale-95 cursor-pointer"
+                  title={isPlaying ? 'Pausar' : 'Reproducir'}
                 >
                   {isPlaying ? (
                     <Pause className="w-4 h-4 fill-black text-black" />
                   ) : (
                     <Play className="w-4 h-4 fill-black text-black ml-0.5" />
                   )}
+                </button>
+
+                <button
+                  onClick={nextTrack}
+                  className="p-1.5 text-neutral-300 hover:text-white rounded-full active:scale-90"
+                  title="Siguiente"
+                >
+                  <SkipForward className="w-4 h-4 fill-white" />
+                </button>
+
+                <button
+                  onClick={() => toggleLikeTrackObject(currentTrack)}
+                  className={`p-1.5 rounded-full transition-colors ${
+                    isLiked ? 'text-pink-400 bg-pink-500/20' : 'text-neutral-400 hover:text-white'
+                  }`}
+                  title={isLiked ? 'Quitar Me gusta' : 'Me gusta'}
+                >
+                  <Heart className={`w-4 h-4 ${isLiked ? 'fill-pink-400' : ''}`} />
                 </button>
               </div>
             </div>
