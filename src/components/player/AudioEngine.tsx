@@ -9,11 +9,9 @@ declare global {
 }
 
 const PUBLIC_INVIDIOUS_INSTANCES = [
-  'https://inv.tux.pizza',
-  'https://vid.puffyan.us',
-  'https://invidious.drgns.space',
-  'https://invidious.nerdvpn.de',
-  'https://api.piped.video',
+  'https://invidious.flokinet.to',
+  'https://yewtu.be',
+  'https://invidious.projectsegfau.lt',
 ];
 
 async function resolveYouTubeVideoId(query: string): Promise<string | null> {

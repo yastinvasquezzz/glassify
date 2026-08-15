@@ -64,39 +64,88 @@ export const searchTracksFromApi = async (queryTerm: string): Promise<{
 
   let tracks: Track[] = [];
 
-  // 1. High-Speed Fallback / Direct iTunes API (Fast, global, 100% browser native)
-  try {
-    const iTunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(queryTerm.trim())}&entity=song&limit=30`;
-    const res = await fetch(iTunesUrl);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.results && data.results.length > 0) {
-        tracks = data.results.map((item: any) => {
-          const title = item.trackName || 'Canción';
-          const artist = item.artistName || 'Artista';
-          const coverUrl = (item.artworkUrl100 || '').replace('100x100bb', '600x600bb');
-          const duration = Math.round((item.trackTimeMillis || 210000) / 1000);
+  // 1. High-Speed Direct Invidious Search (Returns 100% real YouTube 11-char Video IDs with CORS)
+  const CORS_INVIDIOUS_INSTANCES = [
+    'https://invidious.flokinet.to',
+    'https://yewtu.be',
+  ];
 
-          return {
-            id: `track-${item.trackId || item.collectionId}`,
-            videoId: `${artist} - ${title}`,
-            title,
-            artist,
-            artistId: `artist-${encodeURIComponent(artist)}`,
-            album: item.collectionName || 'Álbum',
-            albumId: `album-${item.collectionId}`,
-            coverUrl,
-            audioUrl: '',
-            duration,
-            genre: item.primaryGenreName || 'Música Hi-Fi',
-            dominantColor: `hsl(${Math.abs((title + artist).split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0)) % 360}, 75%, 42%)`,
-            explicit: item.trackExplicitness === 'explicit',
-            playCount: 5000000,
-          };
-        });
+  for (const instance of CORS_INVIDIOUS_INSTANCES) {
+    try {
+      const searchUrl = `${instance}/api/v1/search?q=${encodeURIComponent(queryTerm.trim() + ' song')}&type=video`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const res = await fetch(searchUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          tracks = data.slice(0, 25).map((item: any) => {
+            const videoId = item.videoId;
+            const rawTitle = item.title || 'Canción';
+            const author = item.author || 'Artista';
+            const duration = item.lengthSeconds || 210;
+            const coverUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+
+            return {
+              id: `yt-${videoId}`,
+              videoId,
+              title: rawTitle,
+              artist: author,
+              artistId: `artist-${encodeURIComponent(author)}`,
+              album: `Álbum - ${rawTitle}`,
+              albumId: `album-${encodeURIComponent(author)}`,
+              coverUrl,
+              audioUrl: '',
+              duration,
+              genre: 'Música Hi-Fi',
+              dominantColor: `hsl(${Math.abs(videoId.split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0)) % 360}, 75%, 42%)`,
+              explicit: false,
+              playCount: item.viewCount || 1000000,
+            };
+          });
+          if (tracks.length > 0) break;
+        }
       }
-    }
-  } catch (e) {}
+    } catch (e) {}
+  }
+
+  // 2. High-Speed Fallback: iTunes API (Fast, global, 100% browser native)
+  if (tracks.length === 0) {
+    try {
+      const iTunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(queryTerm.trim())}&entity=song&limit=30`;
+      const res = await fetch(iTunesUrl);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.results && data.results.length > 0) {
+          tracks = data.results.map((item: any) => {
+            const title = item.trackName || 'Canción';
+            const artist = item.artistName || 'Artista';
+            const coverUrl = (item.artworkUrl100 || '').replace('100x100bb', '600x600bb');
+            const duration = Math.round((item.trackTimeMillis || 210000) / 1000);
+
+            return {
+              id: `track-${item.trackId || item.collectionId}`,
+              videoId: `${artist} - ${title}`,
+              title,
+              artist,
+              artistId: `artist-${encodeURIComponent(artist)}`,
+              album: item.collectionName || 'Álbum',
+              albumId: `album-${item.collectionId}`,
+              coverUrl,
+              audioUrl: '',
+              duration,
+              genre: item.primaryGenreName || 'Música Hi-Fi',
+              dominantColor: `hsl(${Math.abs((title + artist).split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0)) % 360}, 75%, 42%)`,
+              explicit: item.trackExplicitness === 'explicit',
+              playCount: 5000000,
+            };
+          });
+        }
+      }
+    } catch (e) {}
+  }
 
   const uniqueTracks = filterUniqueTracks(tracks);
   const result = { tracks: uniqueTracks, albums: [], artists: [] };
