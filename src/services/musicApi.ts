@@ -21,26 +21,8 @@ function filterUniqueTracks(tracks: Track[]): Track[] {
 /**
  * Extracts the 100% COMPLETE FULL SONG audio stream URL directly in the browser
  */
-export const getFullAudioStreamUrl = async (track: Track, forceRefresh = false): Promise<string> => {
-  if (!track) return '';
-
-  if (!forceRefresh && streamCache.has(track.id)) {
-    return streamCache.get(track.id)!;
-  }
-
-  const cleanVideoId = track.videoId || (track.id ? track.id.replace(/^(yt-|track-)/, '') : '');
-  const isVideoId = /^[a-zA-Z0-9_-]{11}$/.test(cleanVideoId);
-
-  const serverPortUrl = 'http://localhost:3001';
-  const queryParam = encodeURIComponent(`${track.artist} - ${track.title}`);
-  const durationParam = track.duration || 0;
-
-  const localProxyUrl = isVideoId
-    ? `${serverPortUrl}/api/stream-audio?id=${cleanVideoId}&q=${queryParam}&duration=${durationParam}`
-    : `${serverPortUrl}/api/stream-audio?id=${encodeURIComponent(track.title)}&q=${queryParam}&duration=${durationParam}`;
-
-  streamCache.set(track.id, localProxyUrl);
-  return localProxyUrl;
+export const getFullAudioStreamUrl = async (_track?: Track, _forceRefresh = false): Promise<string> => {
+  return '';
 };
 
 /**
