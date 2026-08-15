@@ -85,6 +85,8 @@ export const AudioEngine: React.FC = () => {
           modestbranding: 1,
           playsinline: 1,
           rel: 0,
+          origin: window.location.origin,
+          widget_referrer: window.location.origin,
         },
         events: {
           onReady: () => {
